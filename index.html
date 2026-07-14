@@ -1,0 +1,891 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Neural Sound Synthesis · Part 8 — Diffusion & Flow Models</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"
+  onload="renderMathInElement(document.body, {delimiters:[{left:'$$',right:'$$',display:true},{left:'$',right:'$',display:false}],throwOnError:false});"></script>
+<style>
+:root {
+  --bg: #0a0b0f;
+  --bg2: #12141c;
+  --bg3: #1a1d2a;
+  --fg: #d4d6e0;
+  --fg-dim: #8a8d9a;
+  --accent: #8b7bf0;
+  --accent2: #8b7bf0;
+  --accent3: #5ce89a;
+  --accent4: #e85a7a;
+  --accent5: #e8a44a;
+  --border: #2a2d3a;
+  --glow: rgba(74,199,232,0.15);
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth;font-size:16px}
+body{background:var(--bg);color:var(--fg);font-family:'Palatino Linotype','Book Antiqua',Palatino,'Georgia',serif;line-height:1.75;overflow-x:hidden}
+::selection{background:var(--accent);color:var(--bg)}
+a{color:var(--accent);text-decoration:none;border-bottom:1px solid transparent;transition:border-color .2s}
+a:hover{border-bottom-color:var(--accent)}
+
+header{min-height:100vh;display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center;padding:2rem;position:relative;overflow:hidden}
+header canvas{position:absolute;top:0;left:0;width:100%;height:100%;z-index:0;opacity:.5}
+header .content{position:relative;z-index:1;max-width:880px}
+header .eyebrow{font-family:'Lucida Console',Monaco,monospace;font-size:.8rem;letter-spacing:.3em;text-transform:uppercase;color:var(--accent2);margin-bottom:1.4em}
+header h1{font-size:clamp(2rem,5vw,3.4rem);font-weight:300;letter-spacing:.04em;color:var(--accent);text-shadow:0 0 60px rgba(74,199,232,.3);margin-bottom:.3em}
+header h1 em{font-style:italic;color:var(--fg);font-weight:400}
+header .subtitle{font-size:1.12rem;color:var(--fg-dim);max-width:680px;margin:0 auto 2em}
+header .people{display:flex;gap:.6rem;justify-content:center;flex-wrap:wrap;margin-bottom:2em}
+header .people span{font-size:.85rem;color:var(--fg);padding:.35em .9em;border:1px solid var(--border);border-radius:2px;background:rgba(26,29,42,.7)}
+header .cta{display:flex;gap:.8rem;justify-content:center;flex-wrap:wrap}
+
+nav#toc{position:sticky;top:0;z-index:100;background:rgba(10,11,15,.92);backdrop-filter:blur(12px);border-bottom:1px solid var(--border);padding:.6rem 1rem;overflow-x:auto;white-space:nowrap;text-align:center}
+nav#toc a{display:inline-block;font-size:.78rem;color:var(--fg-dim);padding:.3em .7em;margin:0 .1em;letter-spacing:.04em;text-transform:uppercase;font-family:'Lucida Console',Monaco,monospace;transition:color .2s;border-bottom:none}
+nav#toc a:hover,nav#toc a.active{color:var(--accent)}
+
+section{max-width:920px;margin:0 auto;padding:4rem 1.5rem;border-bottom:1px solid var(--border)}
+section:last-of-type{border-bottom:none}
+h2{font-size:clamp(1.5rem,3vw,2.2rem);font-weight:300;color:var(--accent);margin-bottom:.3em;letter-spacing:.03em}
+h2 .num{font-family:'Lucida Console',Monaco,monospace;font-size:.7em;color:var(--fg-dim);margin-right:.5em}
+h3{font-size:1.2rem;color:var(--accent2);margin:2em 0 .5em;font-weight:400}
+h4{font-size:1rem;color:var(--accent3);margin:1.5em 0 .3em;font-weight:400}
+p{margin-bottom:1.2em}
+ul,ol{padding-left:1.4em;margin-bottom:1.2em}
+li{margin-bottom:.5em}
+.lead{font-size:1.08rem;color:var(--fg);margin-bottom:1.5em}
+
+.viz{margin:2em 0;background:var(--bg2);border:1px solid var(--border);border-radius:4px;overflow:hidden}
+.viz canvas{display:block;width:100%;cursor:crosshair}
+.viz-caption{font-size:.8rem;color:var(--fg-dim);padding:.6em 1em;border-top:1px solid var(--border);font-family:'Lucida Console',Monaco,monospace}
+
+.controls{display:flex;flex-wrap:wrap;gap:.8rem;padding:.8em 1em;background:var(--bg3);border-top:1px solid var(--border);align-items:center}
+.controls label{font-size:.78rem;color:var(--fg-dim);font-family:'Lucida Console',Monaco,monospace;display:flex;align-items:center;gap:.4em}
+.controls input[type="range"]{width:120px;accent-color:var(--accent)}
+.controls select{background:var(--bg);color:var(--fg);border:1px solid var(--border);padding:.3em .5em;font-size:.78rem;border-radius:2px;font-family:inherit}
+.controls button,.btn{background:var(--accent);color:var(--bg);border:none;padding:.45em 1em;font-size:.78rem;font-family:'Lucida Console',Monaco,monospace;cursor:pointer;border-radius:2px;letter-spacing:.03em;transition:background .2s}
+.controls button:hover,.btn:hover{background:#6fd4ef}
+.btn-outline{background:transparent;border:1px solid var(--accent);color:var(--accent)}
+.btn-outline:hover{background:var(--accent);color:var(--bg)}
+.controls .val{color:var(--accent);font-family:'Lucida Console',monospace;font-size:.78rem;min-width:2.5em;display:inline-block}
+.tabrow{display:flex;gap:.3em;flex-wrap:wrap}
+.tabrow button{background:var(--bg);border:1px solid var(--border);color:var(--fg-dim)}
+.tabrow button.on{background:var(--accent);color:var(--bg);border-color:var(--accent)}
+
+.math{display:block;text-align:center;padding:1.4em 1.2em;margin:1.5em 0;background:var(--bg2);border-left:3px solid var(--accent);font-size:1.1rem;color:var(--fg);overflow-x:auto;border-radius:0 4px 4px 0}
+.math .katex{font-size:1.2em}
+.math-inline .katex{font-size:1.0em}
+
+.timeline{position:relative;padding:1em 0 1em 2em;margin:2em 0}
+.timeline::before{content:'';position:absolute;left:.6em;top:0;bottom:0;width:2px;background:var(--border)}
+.timeline-item{position:relative;margin-bottom:1.8em;padding-left:1.5em}
+.timeline-item::before{content:'';position:absolute;left:-1.95em;top:.4em;width:10px;height:10px;border-radius:50%;background:var(--accent);border:2px solid var(--bg)}
+.timeline-year{font-family:'Lucida Console',Monaco,monospace;color:var(--accent);font-size:.85rem;margin-bottom:.2em}
+.timeline-text{font-size:.95rem;color:var(--fg-dim)}
+.timeline-text strong{color:var(--fg)}
+
+blockquote{border-left:3px solid var(--accent5);padding:.8em 1.2em;margin:1.5em 0;color:var(--fg-dim);font-style:italic;background:rgba(232,164,74,.05)}
+blockquote cite{display:block;font-size:.85rem;color:var(--accent5);margin-top:.5em;font-style:normal}
+
+.grid-2{display:grid;grid-template-columns:1fr 1fr;gap:1.5em;margin:1.5em 0}
+@media(max-width:700px){.grid-2{grid-template-columns:1fr}}
+
+.references{margin-top:2em;padding:1.5em;background:var(--bg2);border:1px solid var(--border);border-radius:4px}
+.references h3{margin-top:0}
+.references ol{padding-left:1.5em}
+.references li{font-size:.85rem;color:var(--fg-dim);margin-bottom:.5em;line-height:1.5}
+.references li em{color:var(--fg)}
+
+footer{text-align:center;padding:3em 1.5em;color:var(--fg-dim);font-size:.85rem;border-top:1px solid var(--border)}
+footer a{color:var(--accent2)}
+
+::-webkit-scrollbar{width:6px;height:6px}
+::-webkit-scrollbar-track{background:var(--bg)}
+::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
+::-webkit-scrollbar-thumb:hover{background:var(--fg-dim)}
+
+.expandable{margin:1.5em 0;border:1px solid var(--border);border-radius:4px;overflow:hidden}
+.expandable summary{padding:.8em 1.2em;background:var(--bg3);cursor:pointer;font-size:.9rem;color:var(--accent2);font-family:'Lucida Console',Monaco,monospace;letter-spacing:.03em;list-style:none;display:flex;align-items:center;gap:.5em}
+.expandable summary::before{content:'>';font-size:.7em;transition:transform .2s}
+details[open] summary::before{transform:rotate(90deg)}
+.expandable summary:hover{color:var(--fg)}
+.expandable .inner{padding:1.2em 1.4em;background:rgba(139,123,240,.04)}
+.expandable .inner p:last-child{margin-bottom:0}
+
+.note{font-size:.9rem;color:var(--fg-dim);margin:1em 0;padding:.6em 1em;border-left:2px solid var(--accent3);background:rgba(92,232,154,.05)}
+.warn{font-size:.9rem;color:var(--fg-dim);margin:1em 0;padding:.6em 1em;border-left:2px solid var(--accent4);background:rgba(232,90,122,.05)}
+.note strong,.warn strong{color:var(--fg)}
+
+table{width:100%;border-collapse:collapse;margin:1.5em 0;font-size:.9rem}
+th,td{padding:.5em .8em;border:1px solid var(--border);text-align:left;vertical-align:top}
+th{background:var(--bg3);color:var(--accent2);font-weight:400;font-family:'Lucida Console',Monaco,monospace;font-size:.76rem;letter-spacing:.03em}
+td{color:var(--fg-dim)}
+td code,p code,li code{font-family:'Lucida Console',Monaco,monospace;font-size:.85em;color:var(--accent3);background:rgba(92,232,154,.07);padding:.05em .3em;border-radius:2px}
+
+.xref{display:flex;flex-wrap:wrap;gap:.6em;margin:1.5em 0}
+.xref a{font-size:.8rem;padding:.5em 1em;border:1px solid var(--border);background:var(--bg3);font-family:'Lucida Console',Monaco,monospace;color:var(--fg-dim);border-bottom:none;border-radius:3px;transition:all .2s}
+.xref a:hover{color:var(--accent);border-color:var(--accent)}
+.xref a .k{display:block;font-size:.62rem;letter-spacing:.12em;color:var(--accent);margin-bottom:.2em}
+
+.pill{display:inline-block;font-family:'Lucida Console',monospace;font-size:.68rem;letter-spacing:.08em;text-transform:uppercase;padding:.15em .55em;border-radius:2px;border:1px solid var(--border);color:var(--fg-dim);margin-left:.4em;vertical-align:middle}
+</style>
+</head>
+<body>
+
+<header>
+  <canvas id="heroCanvas"></canvas>
+  <div class="content">
+    <div class="eyebrow">Neural Sound Synthesis &middot; Part 8 of 12</div>
+    <h1>Diffusion &amp; <em>Flow</em> Models</h1>
+    <p class="subtitle">
+      A GAN learns to fake a sound in one leap; a diffusion model learns something humbler
+      and stronger — how to remove a <em>little</em> noise. Stack a thousand such steps and
+      static resolves into a violin. This part derives denoising diffusion from the forward
+      noising process to the reverse sampler, connects it to score matching and continuous
+      flows, and confronts its one real weakness — speed. Three live demos throughout.
+    </p>
+    <div class="people">
+      <span>Forward &middot; Reverse &middot; Score</span>
+      <span>DDPM &middot; DDIM &middot; DiffWave &middot; WaveGrad</span>
+      <span>Flow matching &middot; WaveGlow</span>
+    </div>
+    <div class="cta">
+      <a href="#forward" class="btn">Begin &#8595;</a>
+      <a href="https://brendanjameslynskey.github.io/Neural_Sound_Synthesis/" class="btn btn-outline" target="_blank" rel="noopener">Series hub</a>
+    </div>
+  </div>
+</header>
+
+<nav id="toc">
+  <a href="#forward">1 &middot; Forward Process</a>
+  <a href="#reverse">2 &middot; Reverse &amp; Score</a>
+  <a href="#schedule">3 &middot; Noise Schedules</a>
+  <a href="#audio">4 &middot; Audio Diffusion</a>
+  <a href="#steps">5 &middot; The Step Problem</a>
+  <a href="#flow">6 &middot; Flows</a>
+  <a href="#timeline">7 &middot; Timeline</a>
+  <a href="#next">Next</a>
+</nav>
+
+<!-- ============================================================ -->
+<section id="forward">
+  <h2><span class="num">1</span>The forward process — destroy a signal on a schedule</h2>
+  <p class="lead">
+    Diffusion turns generation inside out. Instead of learning to build a sound from
+    nothing, it defines a fixed <em>forward</em> process that takes a clean signal
+    $\mathbf{x}_0$ and, over $T$ steps, drowns it in Gaussian noise until nothing but static
+    remains. The generative model never has to learn this — it is hand-designed. All the
+    model learns is how to walk it <em>backwards</em>.
+  </p>
+  <p>
+    Each forward step adds a pinch of noise and shrinks the signal slightly, governed by a
+    variance schedule $\beta_1,\dots,\beta_T$ with $0<\beta_t\ll 1$:
+  </p>
+  <div class="math">
+    $$q(\mathbf{x}_t\mid\mathbf{x}_{t-1}) = \mathcal{N}\!\big(\mathbf{x}_t;\ \sqrt{1-\beta_t}\,\mathbf{x}_{t-1},\ \beta_t\mathbf{I}\big)$$
+  </div>
+  <p>
+    The magic is that you never need to iterate. Because a composition of Gaussians is
+    Gaussian, the marginal at <em>any</em> step has a closed form in terms of
+    $\mathbf{x}_0$ alone. Writing $\alpha_t = 1-\beta_t$ and
+    $\bar\alpha_t=\prod_{s=1}^{t}\alpha_s$, a single reparameterisation samples $\mathbf{x}_t$ directly:
+  </p>
+  <div class="math">
+    $$q(\mathbf{x}_t\mid\mathbf{x}_0)=\mathcal{N}\!\big(\mathbf{x}_t;\ \sqrt{\bar\alpha_t}\,\mathbf{x}_0,\ (1-\bar\alpha_t)\mathbf{I}\big)\quad\Longrightarrow\quad \mathbf{x}_t=\sqrt{\bar\alpha_t}\,\mathbf{x}_0+\sqrt{1-\bar\alpha_t}\,\boldsymbol\epsilon,\ \ \boldsymbol\epsilon\sim\mathcal{N}(0,\mathbf I)$$
+  </div>
+  <p>
+    Drag the timestep in the demo. At $t=0$ you hear and see the clean tone; slide right and
+    watch $\sqrt{\bar\alpha_t}$ fade the signal while $\sqrt{1-\bar\alpha_t}$ raises the
+    noise floor, until the waveform is indistinguishable from white noise. Then press
+    <strong>Denoise</strong> and watch the process run in reverse — from pure static back to
+    the tone, one small step at a time — and hear the recovered sound.
+  </p>
+
+  <div class="viz">
+    <canvas id="difViz" height="300" aria-label="forward and reverse diffusion of a 1-D audio signal"></canvas>
+    <div class="controls">
+      <label>timestep t <input type="range" id="difT" min="0" max="200" step="1" value="0"><span class="val" id="difTV">0</span></label>
+      <button id="difRun">▶ Denoise (reverse)</button>
+      <button id="difPlay" class="btn-outline">▶ Play clean x₀</button>
+    </div>
+    <div class="viz-caption" id="difCap">Forward: slide t to add noise per the cosine schedule. Reverse: press Denoise to sample x₀ back from pure noise, then hear it.</div>
+  </div>
+
+  <p class="note">
+    <strong>Why this is a good idea.</strong> The forward process manufactures, for free, an
+    endless supply of <em>(noisy input, known clean target)</em> pairs at every noise level.
+    That converts an impossible density-estimation problem into a mundane supervised
+    regression: given a noisy signal and its noise level $t$, predict what was added. No
+    adversary, no likelihood integral — just a squared error.
+  </p>
+
+  <details class="expandable"><summary>derivation · the closed form q(x_t | x_0)</summary>
+    <div class="inner">
+      <p>Apply the recursion and the reparameterisation trick twice. With
+      $\boldsymbol\epsilon_{t-1},\boldsymbol\epsilon'\sim\mathcal N(0,\mathbf I)$ independent,</p>
+      <div class="math">$$\mathbf{x}_t=\sqrt{\alpha_t}\,\mathbf{x}_{t-1}+\sqrt{1-\alpha_t}\,\boldsymbol\epsilon_{t-1}=\sqrt{\alpha_t}\big(\sqrt{\alpha_{t-1}}\mathbf{x}_{t-2}+\sqrt{1-\alpha_{t-1}}\boldsymbol\epsilon_{t-2}\big)+\sqrt{1-\alpha_t}\,\boldsymbol\epsilon_{t-1}.$$</div>
+      <p>The two noise terms are independent Gaussians; their sum has variance
+      $\alpha_t(1-\alpha_{t-1})+(1-\alpha_t)=1-\alpha_t\alpha_{t-1}$, so they merge into one
+      Gaussian of that variance. Unrolling all the way to $\mathbf{x}_0$ telescopes the
+      product of $\alpha$'s into $\bar\alpha_t$:</p>
+      <div class="math">$$\mathbf{x}_t=\sqrt{\bar\alpha_t}\,\mathbf{x}_0+\sqrt{1-\bar\alpha_t}\,\boldsymbol\epsilon.$$</div>
+      <p>This is why diffusion training is cheap: to make a sample at level $t$ you draw one
+      $\boldsymbol\epsilon$ and one multiply-add — never $t$ sequential steps. As
+      $\bar\alpha_t\!\to\!0$ the signal term vanishes and $\mathbf{x}_T\!\approx\!\boldsymbol\epsilon$,
+      a standard normal with no dependence on the data — which is exactly why we can
+      <em>start</em> reverse sampling from pure noise.</p>
+    </div>
+  </details>
+</section>
+
+<!-- ============================================================ -->
+<section id="reverse">
+  <h2><span class="num">2</span>The reverse process — one network, every noise level</h2>
+  <p class="lead">
+    Reversing the chain means sampling from $q(\mathbf{x}_{t-1}\mid\mathbf{x}_t)$. That true
+    reverse is intractable — it depends on the whole data distribution — but for small
+    $\beta_t$ it is provably close to Gaussian, so we approximate it with a learned Gaussian
+    $p_\theta(\mathbf{x}_{t-1}\mid\mathbf{x}_t)=\mathcal N(\mathbf{x}_{t-1};\ \boldsymbol\mu_\theta(\mathbf{x}_t,t),\ \Sigma_t)$.
+    The only thing the network has to produce is that mean.
+  </p>
+  <p>
+    Ho et&nbsp;al. (2020) found the parameterisation that makes it work. Rather than predict
+    the mean directly, predict the <strong>noise</strong> $\boldsymbol\epsilon$ that was
+    added — a network $\boldsymbol\epsilon_\theta(\mathbf{x}_t,t)$. The posterior mean then
+    falls out in closed form, and the training objective collapses to a plain denoising
+    regression, weighted uniformly across timesteps (the celebrated "simple" loss):
+  </p>
+  <div class="math">
+    $$\mathcal{L}_\text{simple}=\mathbb{E}_{t,\,\mathbf{x}_0,\,\boldsymbol\epsilon}\Big[\big\lVert\boldsymbol\epsilon-\boldsymbol\epsilon_\theta\big(\sqrt{\bar\alpha_t}\,\mathbf{x}_0+\sqrt{1-\bar\alpha_t}\,\boldsymbol\epsilon,\ t\big)\big\rVert^2\Big]$$
+  </div>
+  <p>
+    Train one shared network on this single objective — pick a random clean clip, a random
+    $t$, a random $\boldsymbol\epsilon$; corrupt; ask it to name the noise. At sampling time,
+    start from $\mathbf{x}_T\sim\mathcal N(0,\mathbf I)$ and step down using its predictions.
+  </p>
+  <div class="math">
+    $$\mathbf{x}_{t-1}=\frac{1}{\sqrt{\alpha_t}}\Big(\mathbf{x}_t-\frac{1-\alpha_t}{\sqrt{1-\bar\alpha_t}}\,\boldsymbol\epsilon_\theta(\mathbf{x}_t,t)\Big)+\sigma_t\,\mathbf{z},\qquad \mathbf{z}\sim\mathcal N(0,\mathbf I)$$
+  </div>
+
+  <h3>The score-matching view — the same thing from physics</h3>
+  <p>
+    Song &amp; Ermon arrived at diffusion from a different door: <em>score matching</em>. The
+    score of a distribution is the gradient of its log-density,
+    $\nabla_{\mathbf x}\log p(\mathbf x)$ — a vector field pointing "uphill" toward likely
+    data. If you knew it, you could sample by following it (Langevin dynamics). The link to
+    DDPM is exact: predicting the noise <em>is</em> estimating the score of the
+    noise-perturbed data, up to a scale set by the noise level.
+  </p>
+  <div class="math">
+    $$\nabla_{\mathbf{x}_t}\log q(\mathbf{x}_t\mid\mathbf{x}_0)=-\frac{\boldsymbol\epsilon}{\sqrt{1-\bar\alpha_t}}\quad\Longrightarrow\quad \mathbf{s}_\theta(\mathbf{x}_t,t)\approx-\frac{\boldsymbol\epsilon_\theta(\mathbf{x}_t,t)}{\sqrt{1-\bar\alpha_t}}$$
+  </div>
+  <p>
+    Song's 2021 synthesis recast the whole thing as a <strong>stochastic differential
+    equation</strong>: the forward process is an SDE that drifts the data toward noise, and
+    generation solves the corresponding <em>reverse-time</em> SDE, whose drift is exactly the
+    score. DDPM's discrete chain is one particular discretisation of that SDE. This is the
+    unifying picture the rest of the field builds on.
+  </p>
+
+  <details class="expandable"><summary>derivation · from the variational bound to the simple loss</summary>
+    <div class="inner">
+      <p>The true training target is the variational (ELBO) bound on
+      $-\log p_\theta(\mathbf x_0)$, a sum of KL terms
+      $D_{\mathrm{KL}}\!\big(q(\mathbf x_{t-1}\mid\mathbf x_t,\mathbf x_0)\,\|\,p_\theta\big)$.
+      Bayes' rule makes the forward posterior Gaussian with a closed-form mean</p>
+      <div class="math">$$\tilde{\boldsymbol\mu}_t(\mathbf x_t,\mathbf x_0)=\frac{\sqrt{\bar\alpha_{t-1}}\,\beta_t}{1-\bar\alpha_t}\mathbf x_0+\frac{\sqrt{\alpha_t}\,(1-\bar\alpha_{t-1})}{1-\bar\alpha_t}\mathbf x_t,\qquad \tilde\beta_t=\frac{1-\bar\alpha_{t-1}}{1-\bar\alpha_t}\beta_t.$$</div>
+      <p>Each KL between two Gaussians of equal covariance is just a scaled squared
+      difference of means, $\propto\lVert\tilde{\boldsymbol\mu}_t-\boldsymbol\mu_\theta\rVert^2$.
+      Substituting $\mathbf x_0=(\mathbf x_t-\sqrt{1-\bar\alpha_t}\,\boldsymbol\epsilon)/\sqrt{\bar\alpha_t}$
+      and matching terms shows the optimal $\boldsymbol\mu_\theta$ is the sampler formula
+      above, and the residual is precisely
+      $\lVert\boldsymbol\epsilon-\boldsymbol\epsilon_\theta\rVert^2$ times a
+      $t$-dependent weight. Ho et&nbsp;al.'s decisive empirical finding was that
+      <em>dropping</em> that weight — training all timesteps equally — gives better samples.
+      That is the "simple" loss: a maximum-likelihood objective wearing the clothes of a
+      denoiser.</p>
+      <p>The oracle reverse trajectory in Demo&nbsp;1 uses exactly
+      $\tilde{\boldsymbol\mu}_t$ with the <em>true</em> $\mathbf x_0$ — a perfect
+      $\boldsymbol\epsilon_\theta$ — which is why it converges cleanly back to the tone. A
+      trained network only approximates it.</p>
+    </div>
+  </details>
+</section>
+
+<!-- ============================================================ -->
+<section id="schedule">
+  <h2><span class="num">3</span>Noise schedules — the dial that controls destruction</h2>
+  <p class="lead">
+    The schedule $\{\beta_t\}$ is the one free design choice in the forward process, and it
+    matters more than it looks. It decides <em>how fast</em> information is destroyed — and
+    therefore how the model's limited capacity is spread across the noise levels it must
+    learn. Get it wrong and you either waste steps on near-clean signals or annihilate the
+    structure too early.
+  </p>
+  <p>
+    The original DDPM used a <strong>linear</strong> schedule, $\beta_t$ rising linearly from
+    $10^{-4}$ to $0.02$. Nichol &amp; Dhariwal showed it destroys information too quickly near
+    the end: the last quarter of steps operate on what is already almost pure noise, doing
+    little useful work. Their <strong>cosine</strong> schedule fixes this by defining
+    $\bar\alpha_t$ directly so it decays gently and spends more steps in the perceptually
+    critical middle range:
+  </p>
+  <div class="math">
+    $$\bar\alpha_t=\frac{f(t)}{f(0)},\qquad f(t)=\cos^2\!\Big(\frac{t/T+s}{1+s}\cdot\frac{\pi}{2}\Big),\qquad s=0.008$$
+  </div>
+  <p>
+    Switch the schedule below and watch all three views update. The key diagnostic is the
+    <strong>log-SNR</strong>, $\log\!\big(\bar\alpha_t/(1-\bar\alpha_t)\big)$: it measures how
+    much signal survives relative to noise at each step. The cosine curve keeps log-SNR
+    changing smoothly and lingers longer near the informative zero-crossing, whereas the
+    linear schedule plunges through it.
+  </p>
+
+  <div class="viz">
+    <canvas id="schViz" height="330" aria-label="beta, alpha-bar and log-SNR for linear vs cosine noise schedules"></canvas>
+    <div class="controls">
+      <label>schedule
+        <select id="schType"><option value="cosine">cosine (Nichol &amp; Dhariwal)</option><option value="linear">linear (DDPM)</option></select>
+      </label>
+      <label>steps T <input type="range" id="schT" min="20" max="1000" step="20" value="400"><span class="val" id="schTV">400</span></label>
+    </div>
+    <div class="viz-caption" id="schCap">Top: per-step variance β_t. Middle: cumulative signal retention ᾱ_t. Bottom: log-SNR — the schedule's true signature.</div>
+  </div>
+
+  <p class="note">
+    <strong>Read the middle panel.</strong> $\bar\alpha_t$ is the fraction of the clean
+    signal's amplitude that survives to step $t$. Where the cosine curve stays high for
+    longer, the model gets many training examples that are only mildly corrupted — the regime
+    that fixes fine detail. The linear curve dumps that budget into near-pure-noise steps
+    that teach the model almost nothing new.
+  </p>
+</section>
+
+<!-- ============================================================ -->
+<section id="audio">
+  <h2><span class="num">4</span>Diffusion for audio — DiffWave, WaveGrad and guidance</h2>
+  <p class="lead">
+    The 2020 image results landed on audio within months. Two vocoders arrived almost
+    together — <strong>DiffWave</strong> and <strong>WaveGrad</strong> — both generating a raw
+    waveform by denoising, both <em>conditioned</em> on a mel-spectrogram. They are diffusion's
+    answer to the GAN vocoders of Part&nbsp;3: given the mel that a TTS acoustic model
+    produced, invent the matching audio.
+  </p>
+
+  <table>
+    <thead><tr><th>Model</th><th>What it does</th><th>Architecture</th><th>Note</th></tr></thead>
+    <tbody>
+      <tr><td><strong style="color:var(--accent)">DiffWave</strong></td>
+        <td>Denoising diffusion on the raw waveform, conditioned on mel. Also works unconditionally and for class-conditional generation.</td>
+        <td>Bidirectional dilated-conv stack (WaveNet-like), no autoregression — the whole clip is denoised in parallel per step.</td>
+        <td>~6 steps already usable; 50 steps near-transparent.</td></tr>
+      <tr><td><strong style="color:var(--accent5)">WaveGrad</strong></td>
+        <td>Estimates the data gradient (score) to refine noise into audio, conditioned on mel; conditions on a <em>continuous</em> noise level rather than a discrete index.</td>
+        <td>UNet-style with FiLM conditioning on the mel and on $\sqrt{\bar\alpha}$.</td>
+        <td>Trades steps for quality on a single trained model.</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Conditioning — how the mel gets in</h3>
+  <p>
+    The mel-spectrogram enters the denoiser as a side input at every layer, typically
+    upsampled to the audio rate and injected through FiLM / bias-scale modulation. Formally
+    the model learns the <em>conditional</em> score
+    $\boldsymbol\epsilon_\theta(\mathbf x_t,t,\mathbf c)$ with $\mathbf c$ the mel. Everything
+    from Sections 1–2 carries over unchanged; the condition just rides along. This is why the
+    same machinery serves TTS (mel from text), singing (Part&nbsp;5's DiffSinger), and
+    bandwidth extension.
+  </p>
+
+  <h3>Classifier-free guidance — trading diversity for fidelity</h3>
+  <p>
+    To make a conditional model follow its condition more tightly, <strong>classifier-free
+    guidance</strong> (Ho &amp; Salimans) trains one network to do <em>both</em> conditional
+    and unconditional denoising (by randomly dropping $\mathbf c$), then at sampling time
+    extrapolates away from the unconditional prediction:
+  </p>
+  <div class="math">
+    $$\tilde{\boldsymbol\epsilon}_\theta(\mathbf x_t,t,\mathbf c)=\boldsymbol\epsilon_\theta(\mathbf x_t,t,\varnothing)+w\,\big(\boldsymbol\epsilon_\theta(\mathbf x_t,t,\mathbf c)-\boldsymbol\epsilon_\theta(\mathbf x_t,t,\varnothing)\big)$$
+  </div>
+  <p>
+    The guidance weight $w>1$ sharpens adherence to the prompt at some cost in diversity — the
+    same knob that powers text-to-image and, in Parts 11–12, text-to-audio. It needs no
+    separate classifier, which is why it became universal.
+  </p>
+  <div class="warn">
+    <strong>The cost that defines the rest of this part.</strong> Every DiffWave sample is
+    many forward passes through a large network — DiffWave's parallelism across time is a huge
+    win over WaveNet's per-sample autoregression, but it is still tens of network evaluations
+    where a GAN vocoder needs one. Section 5 is about closing that gap.
+  </div>
+</section>
+
+<!-- ============================================================ -->
+<section id="steps">
+  <h2><span class="num">5</span>The step-count problem — and how to sample fast</h2>
+  <p class="lead">
+    Diffusion's Achilles heel is sampling speed. Quality is superb and mode coverage is
+    excellent — it does not collapse the way a GAN can — but a naive DDPM sampler needs
+    hundreds to a thousand sequential network evaluations. That is the same
+    "sequential-slowness" theme that dogged the autoregressive models of Part&nbsp;2, in a new
+    costume. The last five years of diffusion research are largely one question: <em>fewer
+    steps, same quality.</em>
+  </p>
+  <p>
+    Move the step count in the demo. With a good sampler, reconstruction error falls
+    steeply for the first handful of steps and then flattens — a strong signal that most of
+    the thousand-step budget is wasted. The wall-clock scales linearly with steps, so the
+    engineering prize is obvious.
+  </p>
+
+  <div class="viz">
+    <canvas id="stpViz" height="300" aria-label="reconstruction error and cost versus number of reverse sampling steps"></canvas>
+    <div class="controls">
+      <div class="tabrow" id="stpTabs">
+        <button data-k="2">2 steps</button>
+        <button data-k="5">5 steps</button>
+        <button data-k="10" class="on">10 steps</button>
+        <button data-k="25">25 steps</button>
+        <button data-k="100">100 steps</button>
+      </div>
+      <button id="stpPlay">▶ Hear this budget</button>
+    </div>
+    <div class="viz-caption" id="stpCap">Left: reconstruction error vs steps (DDIM-style deterministic sampler). Right: the recovered signal at the chosen budget, over the clean target.</div>
+  </div>
+
+  <h3>Four ways out</h3>
+  <table>
+    <thead><tr><th>Method</th><th>Idea</th><th>Typical steps</th></tr></thead>
+    <tbody>
+      <tr><td><strong style="color:var(--accent)">DDIM</strong></td>
+        <td>A <em>deterministic</em>, non-Markovian sampler sharing the same trained network. Removes the injected noise $\sigma_t\mathbf z$, so you can skip timesteps and take a straight ODE path.</td>
+        <td>10&ndash;50</td></tr>
+      <tr><td><strong style="color:var(--accent5)">Progressive distillation</strong></td>
+        <td>Train a student to match two teacher steps in one, then halve again, repeatedly — each round doubles speed.</td>
+        <td>4&ndash;8</td></tr>
+      <tr><td><strong style="color:var(--accent3)">Consistency models</strong></td>
+        <td>Learn a network that maps <em>any</em> point on a noise trajectory directly to its origin, enabling one- or two-step generation.</td>
+        <td>1&ndash;2</td></tr>
+      <tr><td><strong style="color:var(--accent4)">Rectified flow / flow matching</strong></td>
+        <td>Train straight-line probability paths so an ODE solver needs very few steps; "reflow" straightens them further.</td>
+        <td>1&ndash;4</td></tr>
+    </tbody>
+  </table>
+  <p>
+    DDIM is the workhorse — same weights, a caption-worthy trick. The rest <em>retrain or
+    distil</em> for extra speed. Consistency models and rectified flow are the current
+    frontier, pushing audio diffusion toward the single-pass latency that GANs enjoyed all
+    along, without the mode collapse.
+  </p>
+
+  <details class="expandable"><summary>derivation · why DDIM can skip steps</summary>
+    <div class="inner">
+      <p>DDIM defines a family of non-Markovian forward processes that all share the same
+      marginals $q(\mathbf x_t\mid\mathbf x_0)$ as DDPM — so a network trained with the
+      simple loss is <em>already</em> a valid DDIM model, no retraining. Its update first
+      forms the predicted clean signal (Tweedie's formula),</p>
+      <div class="math">$$\hat{\mathbf x}_0=\frac{\mathbf x_t-\sqrt{1-\bar\alpha_t}\,\boldsymbol\epsilon_\theta(\mathbf x_t,t)}{\sqrt{\bar\alpha_t}},$$</div>
+      <p>then re-noises it to the <em>next</em> level on the subsequence with the model's own
+      $\boldsymbol\epsilon_\theta$ instead of fresh noise:</p>
+      <div class="math">$$\mathbf x_{t-1}=\sqrt{\bar\alpha_{t-1}}\,\hat{\mathbf x}_0+\sqrt{1-\bar\alpha_{t-1}}\,\boldsymbol\epsilon_\theta(\mathbf x_t,t).$$</div>
+      <p>With the stochastic term set to zero this is a deterministic map — an Euler step of
+      the probability-flow ODE. Because there is no re-injected randomness to integrate out,
+      you can evaluate it on any decreasing subset of timesteps and still land near the data
+      manifold; the discretisation error, not lost noise, is all that grows as you take fewer,
+      larger steps. That is exactly the error curve the demo traces.</p>
+    </div>
+  </details>
+</section>
+
+<!-- ============================================================ -->
+<section id="flow">
+  <h2><span class="num">6</span>Flows — exact likelihood and the road to flow matching</h2>
+  <p class="lead">
+    The "&amp; Flow" in the title is not an afterthought — normalizing flows are diffusion's
+    close cousin, and the two are converging. A flow is an <em>invertible</em> neural network
+    $f$ that maps data to a simple base distribution (a Gaussian) and back. Because it is
+    bijective with a tractable Jacobian, it gives something diffusion and GANs cannot: the
+    <strong>exact</strong> log-likelihood, via the change-of-variables formula.
+  </p>
+  <div class="math">
+    $$\log p(\mathbf x)=\log p_{\mathbf z}\big(f(\mathbf x)\big)+\log\Big|\det\frac{\partial f}{\partial \mathbf x}\Big|$$
+  </div>
+  <p>
+    <strong>WaveGlow</strong> (NVIDIA, 2019) is the canonical audio flow: a stack of
+    invertible <em>affine coupling</em> layers, conditioned on the mel-spectrogram, that turns
+    a Gaussian into a waveform in a single parallel forward pass — no autoregression, no
+    iterative denoising. Trained purely by maximising the exact likelihood above, it sidesteps
+    the adversarial instability of GAN vocoders and the many-step cost of diffusion. The price
+    is architectural: invertibility with a cheap Jacobian is a real constraint, so flows tend
+    to need many parameters for a given quality, and the affine-coupling trick limits how the
+    network can mix its inputs.
+  </p>
+
+  <h3>Continuous flows meet diffusion</h3>
+  <p>
+    Push the number of coupling layers to a continuum and a flow becomes an ODE — a
+    <em>continuous normalizing flow</em> — that transports the Gaussian to the data along a
+    smooth trajectory. This is the bridge: diffusion's probability-flow ODE and a CNF are the
+    same kind of object. <strong>Flow matching</strong> (Lipman et&nbsp;al., 2023) trains such
+    an ODE directly by regressing its velocity field onto a chosen target path, and
+    <strong>rectified flow</strong> chooses <em>straight</em> paths so the ODE integrates in a
+    handful of steps:
+  </p>
+  <div class="math">
+    $$\mathbf x_t=(1-t)\,\mathbf x_0+t\,\boldsymbol\epsilon,\qquad \mathcal L_\text{FM}=\mathbb E_{t,\mathbf x_0,\boldsymbol\epsilon}\big\lVert v_\theta(\mathbf x_t,t)-(\boldsymbol\epsilon-\mathbf x_0)\big\rVert^2$$
+  </div>
+  <p>
+    Notice the family resemblance to the diffusion loss of Section 2 — both regress a network
+    onto a simple target under a linear interpolation of data and noise. Flow matching is
+    increasingly the training objective of choice for new audio and music generators precisely
+    because it inherits diffusion's stability and coverage while sampling in far fewer steps.
+  </p>
+
+  <div class="grid-2">
+    <div class="note"><strong>Diffusion vs flow, one line.</strong> Diffusion learns to reverse a <em>stochastic</em> corruption step by step; a flow learns a single <em>deterministic invertible</em> map. Flow matching unifies them: a deterministic ODE trained the diffusion way.</div>
+    <div class="warn"><strong>Where flows lost.</strong> Pure normalizing flows never matched diffusion's peak quality at equal size — the invertibility constraint is expensive. Their ideas survived not as standalone vocoders but folded into VITS (Part 6) and into the flow-matching objective now training the latest systems.</div>
+  </div>
+</section>
+
+<!-- ============================================================ -->
+<section id="timeline">
+  <h2><span class="num">7</span>Four years, static to state of the art</h2>
+  <p>
+    Diffusion went from an image-generation curiosity to the dominant paradigm for
+    high-fidelity audio and music in about four years. Each line below is a step on the road
+    from "beautiful but slow" to "beautiful and fast."
+  </p>
+  <div class="timeline">
+    <div class="timeline-item"><div class="timeline-year">2020</div><div class="timeline-text"><strong>DDPM</strong> (Ho et&nbsp;al.) makes denoising diffusion practical with the ε-prediction simple loss; <strong>DiffWave</strong> &amp; <strong>WaveGrad</strong> bring it to audio as mel-conditioned vocoders. <span class="pill">Part 8</span></div></div>
+    <div class="timeline-item"><div class="timeline-year">2021</div><div class="timeline-text"><strong>DDIM</strong> enables deterministic few-step sampling on trained models; Song et&nbsp;al.'s <strong>score SDE</strong> unifies diffusion and score matching; cosine schedules and classifier-free guidance sharpen quality. <span class="pill">Part 8</span></div></div>
+    <div class="timeline-item"><div class="timeline-year">2022</div><div class="timeline-text"><strong>Progressive distillation</strong> compresses samplers to a handful of steps; <strong>latent diffusion</strong> moves the process into a VAE space, powering <strong>Riffusion</strong> and <strong>AudioLDM</strong>. <span class="pill">Part 11</span></div></div>
+    <div class="timeline-item"><div class="timeline-year">2023</div><div class="timeline-text"><strong>Consistency models</strong> reach one/two-step generation; <strong>flow matching</strong> &amp; <strong>rectified flow</strong> straighten the paths; <strong>Stable Audio</strong> diffuses long musical structure in a latent. <span class="pill">Part 11 · 12</span></div></div>
+  </div>
+</section>
+
+<!-- ============================================================ -->
+<section id="next">
+  <h2><span class="num">→</span>Where to go next</h2>
+  <p>
+    You now hold the full diffusion toolkit: the forward noising process and its closed form,
+    the ε-prediction reverse sampler and its score-matching twin, the schedules that shape
+    destruction, the audio models that put it to work, the many-step problem and the
+    DDIM/distillation/consistency/flow-matching answers to it. Diffusion shines in a
+    <em>latent</em> space rather than on raw samples — which is exactly why the next parts
+    build the codecs and VAEs that give it one.
+  </p>
+  <div class="xref">
+    <a href="https://brendanjameslynskey.github.io/Neural_Sound_Synthesis/"><span class="k">Series hub</span>All twelve parts &middot; the interactive map</a>
+    <a href="https://brendanjameslynskey.github.io/Neural_Sound_Synthesis_07_GAN_Instrument_Synthesis/"><span class="k">Part 7 ←</span>GAN Instrument Synthesis</a>
+    <a href="https://brendanjameslynskey.github.io/Neural_Sound_Synthesis_09_Neural_Audio_Codecs/"><span class="k">Part 9 →</span>Neural Audio Codecs</a>
+    <a href="https://github.com/BrendanJamesLynskey/DSP_and_Music"><span class="k">Collection</span>DSP &amp; Music</a>
+  </div>
+  <div class="references">
+    <h3>References</h3>
+    <ol>
+      <li>Ho, J., Jain, A., Abbeel, P. (2020). <em>Denoising Diffusion Probabilistic Models.</em> NeurIPS. arXiv:2006.11239.</li>
+      <li>Song, Y. et&nbsp;al. (2021). <em>Score-Based Generative Modeling through Stochastic Differential Equations.</em> ICLR. arXiv:2011.13456.</li>
+      <li>Kong, Z. et&nbsp;al. (2021). <em>DiffWave: A Versatile Diffusion Model for Audio Synthesis.</em> ICLR. arXiv:2009.09761.</li>
+      <li>Chen, N. et&nbsp;al. (2021). <em>WaveGrad: Estimating Gradients for Waveform Generation.</em> ICLR. arXiv:2009.00713.</li>
+      <li>Song, J., Meng, C., Ermon, S. (2021). <em>Denoising Diffusion Implicit Models (DDIM).</em> ICLR. arXiv:2010.02502.</li>
+      <li>Nichol, A. &amp; Dhariwal, P. (2021). <em>Improved Denoising Diffusion Probabilistic Models.</em> ICML. (Cosine schedule.) arXiv:2102.09672.</li>
+      <li>Ho, J. &amp; Salimans, T. (2022). <em>Classifier-Free Diffusion Guidance.</em> NeurIPS Workshop. arXiv:2207.12598.</li>
+      <li>Prenger, R., Valle, R., Catanzaro, B. (2019). <em>WaveGlow: A Flow-based Generative Network for Speech Synthesis.</em> ICASSP. arXiv:1811.00002.</li>
+      <li>Song, Y. et&nbsp;al. (2023). <em>Consistency Models.</em> ICML. arXiv:2303.01469.</li>
+      <li>Lipman, Y. et&nbsp;al. (2023). <em>Flow Matching for Generative Modeling.</em> ICLR. arXiv:2210.02747.</li>
+    </ol>
+  </div>
+</section>
+
+<footer>
+  <p>
+    Neural Sound Synthesis &middot; Part 8 — Diffusion &amp; Flow Models<br>
+    Part of the <a href="https://github.com/BrendanJamesLynskey/DSP_and_Music" target="_blank" rel="noopener">DSP &amp; Music</a> collection &middot;
+    single-file HTML/CSS/JS &middot; Web Audio API &middot; KaTeX &middot; no dependencies.
+  </p>
+</footer>
+
+<script>
+(function(){
+"use strict";
+// ── utilities ─────────────────────────────────────────────────
+const DPR=window.devicePixelRatio||1;
+function setupCanvas(c,w,h){ c.width=Math.round(w*DPR); c.height=Math.round(h*DPR); c.style.height=h+'px'; const x=c.getContext('2d'); x.setTransform(DPR,0,0,DPR,0,0); return x; }
+function fitWidth(c){ const r=c.parentElement.getBoundingClientRect(); return Math.max(320,Math.floor(r.width)); }
+let audioCtx=null;
+function actx(){ if(!audioCtx) audioCtx=new (window.AudioContext||window.webkitAudioContext)(); if(audioCtx.state==='suspended') audioCtx.resume(); return audioCtx; }
+function play(samples,sr){ const a=actx(); const b=a.createBuffer(1,samples.length,sr); b.getChannelData(0).set(samples); const s=a.createBufferSource(); s.buffer=b; const g=a.createGain(); g.gain.value=0.9; s.connect(g); g.connect(a.destination); s.start(); return s; }
+function fade(buf,n){ const N=buf.length,k=Math.min(n,N>>1); for(let i=0;i<k;i++){ buf[i]*=i/k; buf[N-1-i]*=i/k; } return buf; }
+
+// ── extra helper: standard-normal sample (Box–Muller) ─────────
+function gauss(){ let u=0,v=0; while(u===0)u=Math.random(); while(v===0)v=Math.random(); return Math.sqrt(-2*Math.log(u))*Math.cos(2*Math.PI*v); }
+const SR=16000;
+
+// ── DEMO 1: forward / reverse diffusion (flagship) ────────────
+(function diffusion(){
+  const c=document.getElementById('difViz'); if(!c) return;
+  const cap=document.getElementById('difCap'); const H=300;
+  let W=fitWidth(c); let ctx=setupCanvas(c,W,H);
+  const tEl=document.getElementById('difT'), tV=document.getElementById('difTV');
+  const T=200, sOff=0.008;
+  // cosine cumulative alpha-bar
+  const abar=new Float32Array(T+1);
+  const f0=Math.pow(Math.cos((0/T+sOff)/(1+sOff)*Math.PI/2),2);
+  for(let t=0;t<=T;t++){ let a=Math.pow(Math.cos((t/T+sOff)/(1+sOff)*Math.PI/2),2)/f0; abar[t]=Math.max(1e-5,Math.min(1,a)); }
+  // clean audio signal x0
+  const DUR=0.5, n=Math.floor(SR*DUR);
+  const x0=new Float32Array(n);
+  for(let i=0;i<n;i++){ const t=i/SR; const env=Math.exp(-t*2.5); x0[i]=env*(Math.sin(2*Math.PI*220*t)+0.5*Math.sin(2*Math.PI*440*t)+0.28*Math.sin(2*Math.PI*660*t)); }
+  { let m=0; for(let i=0;i<n;i++) m=Math.max(m,Math.abs(x0[i])); if(m>0) for(let i=0;i<n;i++) x0[i]/=m/0.9; fade(x0,300); }
+  // fixed noise realisation for the forward slider
+  const eps=new Float32Array(n); for(let i=0;i<n;i++) eps[i]=gauss();
+  let running=false, raf=null;
+  function forwardAt(t){ const a=Math.sqrt(abar[t]), b=Math.sqrt(1-abar[t]); const out=new Float32Array(n); for(let i=0;i<n;i++) out[i]=a*x0[i]+b*eps[i]; return out; }
+  function drawSig(sig,t,rev){
+    ctx.fillStyle='#12141c'; ctx.fillRect(0,0,W,H);
+    const padX=20, plotW=W-2*padX, top=30, plotH=H-80;
+    ctx.fillStyle='#8a8d9a'; ctx.font="11px 'Lucida Console',monospace"; ctx.textAlign='left';
+    ctx.fillText((rev?'REVERSE — sampling x₀ from noise':'FORWARD — x_t = √ᾱ_t·x₀ + √(1−ᾱ_t)·ε'), padX, 18);
+    // clean reference faint (forward only)
+    if(!rev){ ctx.strokeStyle='rgba(212,214,224,0.14)'; ctx.lineWidth=1; ctx.beginPath();
+      const st=Math.max(1,Math.floor(n/plotW));
+      for(let px=0;px<plotW;px++){ const v=x0[px*st]||0; const y=top+plotH/2-v*plotH*0.46; if(px===0)ctx.moveTo(padX+px,y);else ctx.lineTo(padX+px,y);} ctx.stroke(); }
+    // current signal min/max envelope
+    ctx.strokeStyle='rgba(139,123,240,0.25)'; ctx.beginPath(); ctx.moveTo(padX,top+plotH/2); ctx.lineTo(padX+plotW,top+plotH/2); ctx.stroke();
+    ctx.strokeStyle=rev?'#5ce89a':'#8b7bf0'; ctx.lineWidth=1.2; ctx.beginPath();
+    const step=Math.max(1,Math.floor(sig.length/plotW));
+    for(let px=0;px<plotW;px++){ let mn=1,mx=-1; for(let s=0;s<step;s++){ const v=sig[px*step+s]||0; if(v<mn)mn=v; if(v>mx)mx=v; } const y1=top+plotH/2-mx*plotH*0.46, y2=top+plotH/2-mn*plotH*0.46; ctx.moveTo(padX+px,y1); ctx.lineTo(padX+px,y2); }
+    ctx.stroke();
+    // noise-level meter
+    const noise=Math.sqrt(1-abar[t]), sig_r=Math.sqrt(abar[t]);
+    const my=top+plotH+22, mw=plotW;
+    ctx.fillStyle='#8a8d9a'; ctx.font="10px 'Lucida Console',monospace";
+    ctx.fillText('t = '+t+' / '+T+'    √ᾱ_t (signal) = '+sig_r.toFixed(3)+'    √(1−ᾱ_t) (noise) = '+noise.toFixed(3), padX, my-6);
+    ctx.fillStyle='rgba(139,123,240,0.20)'; ctx.fillRect(padX,my,mw,10);
+    ctx.fillStyle='#8b7bf0'; ctx.fillRect(padX,my,mw*sig_r,10);
+    ctx.fillStyle='#e85a7a'; ctx.fillRect(padX+mw*sig_r,my,mw*noise,10);
+    ctx.fillStyle='#8a8d9a'; ctx.fillText('signal', padX+2, my+9); ctx.textAlign='right'; ctx.fillText('noise', padX+mw-2, my+9); ctx.textAlign='left';
+  }
+  function reverse(){
+    if(running) return; running=true; cap.textContent='Reverse sampling… iterating the DDPM posterior from pure noise toward x₀.';
+    let x=new Float32Array(n); for(let i=0;i<n;i++) x[i]=gauss();
+    let t=T; cancelAnimationFrame(raf);
+    function frame(){
+      for(let k=0;k<4 && t>=1;k++){
+        const at=abar[t], atm=abar[t-1];
+        let beta=1-at/atm; beta=Math.max(1e-5,Math.min(0.999,beta));
+        const c1=Math.sqrt(atm)*beta/(1-at);
+        const c2=Math.sqrt(Math.max(0,1-beta))*(1-atm)/(1-at);
+        const varp=Math.max(0,(1-atm)/(1-at)*beta); const sd=Math.sqrt(varp);
+        const nx=new Float32Array(n);
+        for(let i=0;i<n;i++){ const mean=c1*x0[i]+c2*x[i]; nx[i]=mean+(t>1?sd*gauss():0); }
+        x=nx; t--;
+      }
+      tEl.value=t; tV.textContent=t; drawSig(x,t,true);
+      if(t>=1){ raf=requestAnimationFrame(frame); }
+      else { running=false; const out=x.slice(0,n); fade(out,300); try{ play(out,SR); }catch(e){} cap.textContent='Reverse complete — recovered the clean tone from pure noise in '+T+' steps. Playing the result.'; }
+    }
+    frame();
+  }
+  tEl.addEventListener('input',()=>{ if(running){ running=false; cancelAnimationFrame(raf); } const t=+tEl.value; tV.textContent=t; drawSig(forwardAt(t),t,false); });
+  document.getElementById('difRun').addEventListener('click',reverse);
+  document.getElementById('difPlay').addEventListener('click',()=>{ try{ play(fade(x0.slice(0,n),300),SR); }catch(e){} });
+  window.addEventListener('resize',()=>{ W=fitWidth(c); ctx=setupCanvas(c,W,H); if(!running) drawSig(forwardAt(+tEl.value),+tEl.value,false); });
+  drawSig(forwardAt(0),0,false);
+})();
+
+// ── DEMO 2: noise-schedule explorer ───────────────────────────
+(function schedule(){
+  const c=document.getElementById('schViz'); if(!c) return;
+  const H=330; let W=fitWidth(c); let ctx=setupCanvas(c,W,H);
+  const typeEl=document.getElementById('schType'), tEl=document.getElementById('schT'), tV=document.getElementById('schTV');
+  function build(type,T){
+    const abar=new Float32Array(T+1), beta=new Float32Array(T+1);
+    if(type==='cosine'){
+      const s=0.008, f0=Math.pow(Math.cos((0/T+s)/(1+s)*Math.PI/2),2);
+      abar[0]=1;
+      for(let t=1;t<=T;t++){ abar[t]=Math.max(1e-6,Math.min(1,Math.pow(Math.cos((t/T+s)/(1+s)*Math.PI/2),2)/f0)); }
+      for(let t=1;t<=T;t++){ let b=1-abar[t]/abar[t-1]; beta[t]=Math.max(0,Math.min(0.999,b)); }
+    } else { // linear
+      const bmin=1e-4, bmax=0.02; abar[0]=1; let ap=1;
+      for(let t=1;t<=T;t++){ const b=bmin+(bmax-bmin)*(t-1)/Math.max(1,T-1); beta[t]=b; ap*=(1-b); abar[t]=ap; }
+    }
+    return {abar,beta};
+  }
+  function draw(){
+    const type=typeEl.value, T=+tEl.value; tV.textContent=T;
+    const {abar,beta}=build(type,T);
+    ctx.fillStyle='#12141c'; ctx.fillRect(0,0,W,H);
+    const padX=54, plotW=W-padX-16;
+    const rows=3, gap=14, rowH=(H-40-gap*(rows-1))/rows, top0=24;
+    // sample indices to <= 400 points
+    const M=Math.min(T,400);
+    function xAt(i){ return padX + (i/(M-1))*plotW; }
+    function idx(i){ return 1+Math.round((i/(M-1))*(T-1)); }
+    // find beta max for scaling
+    let bmax=1e-6; for(let t=1;t<=T;t++) bmax=Math.max(bmax,beta[t]);
+    function panel(r,label,valAt,vmin,vmax,col){
+      const top=top0+r*(rowH+gap);
+      ctx.strokeStyle='rgba(255,255,255,0.07)'; ctx.strokeRect(padX,top,plotW,rowH);
+      ctx.fillStyle='#8a8d9a'; ctx.font="10px 'Lucida Console',monospace"; ctx.textAlign='left';
+      ctx.fillText(label, padX, top-4);
+      ctx.fillStyle='#6a6d7a'; ctx.textAlign='right';
+      ctx.fillText(vmax.toFixed(vmax<1?2:1), padX-4, top+8);
+      ctx.fillText(vmin.toFixed(vmin<1&&vmin>-1?2:1), padX-4, top+rowH);
+      ctx.textAlign='left';
+      ctx.strokeStyle=col; ctx.lineWidth=1.6; ctx.beginPath();
+      for(let i=0;i<M;i++){ const v=valAt(idx(i)); const yy=top+rowH-((v-vmin)/(vmax-vmin))*rowH; const y=Math.max(top,Math.min(top+rowH,yy)); if(i===0)ctx.moveTo(xAt(i),y);else ctx.lineTo(xAt(i),y);} ctx.stroke();
+    }
+    panel(0,'β_t  (per-step variance)', t=>beta[t], 0, bmax*1.05, '#e85a7a');
+    panel(1,'ᾱ_t  (signal retention)', t=>abar[t], 0, 1, '#8b7bf0');
+    // log-SNR range
+    let lo=1e9,hi=-1e9; for(let t=1;t<=T;t++){ const l=Math.log(abar[t]/(1-abar[t]+1e-9)); if(isFinite(l)){ lo=Math.min(lo,l); hi=Math.max(hi,l);} }
+    if(!isFinite(lo)){lo=-10;hi=10;}
+    panel(2,'log-SNR = log( ᾱ_t / (1−ᾱ_t) )', t=>Math.max(lo,Math.min(hi,Math.log(abar[t]/(1-abar[t]+1e-9)))), lo, hi, '#5ce89a');
+    ctx.fillStyle='#6a6d7a'; ctx.font="10px 'Lucida Console',monospace"; ctx.textAlign='right';
+    ctx.fillText('t → T', W-16, H-4); ctx.textAlign='left';
+  }
+  [typeEl,tEl].forEach(el=>el.addEventListener('input',draw));
+  window.addEventListener('resize',()=>{ W=fitWidth(c); ctx=setupCanvas(c,W,H); draw(); });
+  draw();
+})();
+
+// ── DEMO 3: sampling steps vs quality ─────────────────────────
+(function steps(){
+  const c=document.getElementById('stpViz'); if(!c) return;
+  const cap=document.getElementById('stpCap'); const H=300;
+  let W=fitWidth(c); let ctx=setupCanvas(c,W,H);
+  const N=64; const STEPS=[2,5,10,25,100]; let sel=10;
+  // clean signal (low-dim, for the reconstruction demo)
+  const x0=new Float32Array(N);
+  for(let i=0;i<N;i++){ const t=i/N; x0[i]=Math.sin(2*Math.PI*3*t)*Math.exp(-t*1.2)+0.4*Math.sin(2*Math.PI*7*t)*Math.exp(-t*2.0); }
+  { let m=0; for(let i=0;i<N;i++) m=Math.max(m,Math.abs(x0[i])); for(let i=0;i<N;i++) x0[i]/=m; }
+  // DFT helpers (N=64, naive)
+  function dft(re){ const R=new Float32Array(N),I=new Float32Array(N); for(let k=0;k<N;k++){ let sr=0,si=0; for(let nn=0;nn<N;nn++){ const w=-2*Math.PI*k*nn/N; sr+=re[nn]*Math.cos(w); si+=re[nn]*Math.sin(w);} R[k]=sr;I[k]=si;} return [R,I]; }
+  function idft(R,I){ const out=new Float32Array(N); for(let nn=0;nn<N;nn++){ let s=0; for(let k=0;k<N;k++){ const w=2*Math.PI*k*nn/N; s+=R[k]*Math.cos(w)-I[k]*Math.sin(w);} out[nn]=s/N; } return out; }
+  const [X0R,X0I]=dft(x0); const P=new Float32Array(N); for(let k=0;k<N;k++) P[k]=(X0R[k]*X0R[k]+X0I[k]*X0I[k])/(N*N)+1e-6;
+  // cosine schedule over Tfull
+  const Tf=1000, s=0.008, f0=Math.pow(Math.cos((0/Tf+s)/(1+s)*Math.PI/2),2);
+  function abarOf(t){ if(t<=0) return 1; if(t>=Tf) return 1e-5; return Math.max(1e-5,Math.min(1,Math.pow(Math.cos((t/Tf+s)/(1+s)*Math.PI/2),2)/f0)); }
+  // deterministic base noise
+  let seed=2246; function rnd(){ seed=(seed*1103515245+12345)&0x7fffffff; return seed/0x7fffffff; }
+  function gz(){ let u=rnd(),v=rnd(); if(u<1e-9)u=1e-9; return Math.sqrt(-2*Math.log(u))*Math.cos(2*Math.PI*v); }
+  const z=new Float32Array(N); for(let i=0;i<N;i++) z[i]=gz();
+  // Wiener denoiser: estimate x0 from x_t at level abar
+  function denoise(x,ab){
+    const inv=1/Math.sqrt(ab); const y=new Float32Array(N); for(let i=0;i<N;i++) y[i]=x[i]*inv;
+    const s2=(1-ab)/ab; // relative noise variance
+    const [YR,YI]=dft(y);
+    const R=new Float32Array(N),I=new Float32Array(N);
+    for(let k=0;k<N;k++){ const g=P[k]/(P[k]+s2); R[k]=YR[k]*g; I[k]=YI[k]*g; }
+    return idft(R,I);
+  }
+  // DDIM deterministic sampling with K steps; returns {rec, err}
+  function sample(K){
+    const taus=[]; for(let i=0;i<=K;i++) taus.push(Math.round(Tf*(1-i/K)));
+    let ab0=abarOf(taus[0]);
+    let x=new Float32Array(N); for(let i=0;i<N;i++) x[i]=Math.sqrt(ab0)*x0[i]+Math.sqrt(1-ab0)*z[i];
+    let x0hat=x.slice();
+    for(let i=0;i<K;i++){ const t=taus[i], tn=taus[i+1]; const ab=abarOf(t), abn=abarOf(tn);
+      x0hat=denoise(x,ab);
+      const epsHat=new Float32Array(N); const sa=Math.sqrt(ab), sb=Math.sqrt(1-ab)||1e-6;
+      for(let j=0;j<N;j++) epsHat[j]=(x[j]-sa*x0hat[j])/sb;
+      const nx=new Float32Array(N); const san=Math.sqrt(abn), sbn=Math.sqrt(1-abn);
+      for(let j=0;j<N;j++) nx[j]=san*x0hat[j]+sbn*epsHat[j];
+      x=nx;
+    }
+    let e=0; for(let i=0;i<N;i++) e+=(x0hat[i]-x0[i])**2; e/=N;
+    return {rec:x0hat, err:e};
+  }
+  const results={}; STEPS.forEach(K=>{ results[K]=sample(K); });
+  function draw(){
+    ctx.fillStyle='#12141c'; ctx.fillRect(0,0,W,H);
+    const midX=Math.min(W*0.52,W-220);
+    const padT=28, plotH=H-70;
+    // LEFT: error vs steps (log-x)
+    ctx.fillStyle='#8a8d9a'; ctx.font="10px 'Lucida Console',monospace"; ctx.textAlign='left';
+    ctx.fillText('RECONSTRUCTION ERROR vs STEPS', 14, 16);
+    const gx0=44, gw=midX-gx0-18, gy0=padT, gh=plotH;
+    ctx.strokeStyle='rgba(255,255,255,0.07)'; ctx.strokeRect(gx0,gy0,gw,gh);
+    let emax=0; STEPS.forEach(K=>emax=Math.max(emax,results[K].err)); emax*=1.1; if(emax<1e-9)emax=1;
+    const lminK=Math.log(2), lmaxK=Math.log(100);
+    const X=K=>gx0+(Math.log(K)-lminK)/(lmaxK-lminK)*gw;
+    const Y=e=>gy0+gh-(e/emax)*gh;
+    // axis labels
+    ctx.fillStyle='#6a6d7a'; ctx.textAlign='right'; ctx.fillText(emax.toFixed(3),gx0-4,gy0+8); ctx.fillText('0',gx0-4,gy0+gh); ctx.textAlign='center';
+    STEPS.forEach(K=>ctx.fillText(String(K),X(K),gy0+gh+12));
+    ctx.textAlign='left'; ctx.fillText('steps (log)', midX-70, gy0+gh+12);
+    // curve
+    ctx.strokeStyle='#8b7bf0'; ctx.lineWidth=1.8; ctx.beginPath();
+    STEPS.forEach((K,i)=>{ const x=X(K),y=Y(results[K].err); if(i===0)ctx.moveTo(x,y);else ctx.lineTo(x,y);}); ctx.stroke();
+    STEPS.forEach(K=>{ const x=X(K),y=Y(results[K].err); const on=(K===sel); ctx.fillStyle=on?'#5ce89a':'#8b7bf0'; ctx.beginPath(); ctx.arc(x,y,on?5:3,0,7); ctx.fill(); });
+    // RIGHT: reconstruction at selected K
+    const rx0=midX+16, rw=W-rx0-14;
+    ctx.fillStyle='#8a8d9a'; ctx.textAlign='left'; ctx.fillText('RECOVERED @ '+sel+' STEPS', rx0, 16);
+    ctx.strokeStyle='rgba(255,255,255,0.06)'; ctx.beginPath(); ctx.moveTo(rx0,padT+plotH*0.5); ctx.lineTo(rx0+rw,padT+plotH*0.5); ctx.stroke();
+    function curve(arr,col,lw){ ctx.strokeStyle=col; ctx.lineWidth=lw; ctx.beginPath(); for(let i=0;i<N;i++){ const x=rx0+i/(N-1)*rw; const y=padT+plotH*0.5-arr[i]*plotH*0.42; if(i===0)ctx.moveTo(x,y);else ctx.lineTo(x,y);} ctx.stroke(); }
+    curve(x0,'rgba(212,214,224,0.25)',1.2);
+    curve(results[sel].rec,'#5ce89a',1.8);
+    ctx.fillStyle='#8b7bf0'; ctx.font="11px 'Lucida Console',monospace";
+    ctx.fillText('MSE = '+results[sel].err.toFixed(4), rx0, padT+plotH+14);
+    ctx.fillStyle='#e8a44a'; ctx.textAlign='right';
+    ctx.fillText('≈ '+(sel*6)+' ms  ('+sel+' NFEs)', rx0+rw, padT+plotH+14); ctx.textAlign='left';
+  }
+  document.getElementById('stpTabs').addEventListener('click',e=>{ const b=e.target.closest('button'); if(!b) return; sel=+b.dataset.k; [...e.currentTarget.children].forEach(x=>x.classList.toggle('on',x===b)); draw(); cap.textContent='Selected '+sel+' reverse steps — MSE '+results[sel].err.toFixed(4)+'. Fewer steps = larger discretisation error; DDIM/distillation/consistency push this curve left.'; });
+  document.getElementById('stpPlay').addEventListener('click',()=>{
+    // sonify the recovered low-dim signal by tiling it into a short tone
+    const dur=0.5, m=Math.floor(SR*dur); const out=new Float32Array(m); const rec=results[sel].rec;
+    for(let i=0;i<m;i++){ const t=i/SR; let sVal=0; for(let h=1;h<=6;h++){ sVal+=(rec[(h*4)%N])*Math.sin(2*Math.PI*180*h*t)/h; } out[i]=sVal*Math.exp(-t*2.5); }
+    let mm=0; for(let i=0;i<m;i++) mm=Math.max(mm,Math.abs(out[i])); if(mm>0) for(let i=0;i<m;i++) out[i]/=mm/0.8;
+    try{ play(fade(out,300),SR); }catch(e){}
+  });
+  window.addEventListener('resize',()=>{ W=fitWidth(c); ctx=setupCanvas(c,W,H); draw(); });
+  draw();
+})();
+
+// ── hero animation: waveform morphing into spectrogram bars ───
+(function hero(){
+  const c=document.getElementById('heroCanvas'); if(!c) return;
+  const W=()=>Math.max(320,document.documentElement.clientWidth);
+  const H=()=>Math.max(400,Math.min(window.innerHeight,900));
+  let ctx=setupCanvas(c,W(),H());
+  const N=200; let ph=0; let last=performance.now();
+  function frame(now){
+    const w=W(),h=H(); if(c.width!==Math.round(w*DPR)||c.height!==Math.round(h*DPR)) ctx=setupCanvas(c,w,h);
+    const dt=Math.min(0.05,(now-last)/1000); last=now; ph+=dt*0.6;
+    ctx.fillStyle='rgba(10,11,15,0.22)'; ctx.fillRect(0,0,w,h);
+    const morph=0.5+0.5*Math.sin(ph*0.5); // 0 = waveform, 1 = bars
+    ctx.strokeStyle='rgba(74,199,232,0.75)'; ctx.lineWidth=1.6;
+    for(let i=0;i<N;i++){
+      const x=i/(N-1)*w;
+      const tt=i*0.12+ph*3;
+      const wav=Math.sin(tt)+0.5*Math.sin(tt*2.01)+0.3*Math.sin(tt*3.03);
+      const env=0.4+0.6*Math.abs(Math.sin(i*0.05+ph));
+      const barTop=h*0.5 - env*h*0.30*(0.5+0.5*Math.sin(i*0.7+ph*2));
+      const wy=h*0.5 - wav*h*0.09;
+      if(morph<0.5){ // waveform line
+        if(i===0){ctx.beginPath(); ctx.moveTo(x,wy);} else ctx.lineTo(x,wy);
+      }
+    }
+    if(morph<0.5) ctx.stroke();
+    if(morph>=0.5){ // spectrogram-ish bars
+      for(let i=0;i<N;i++){ const x=i/(N-1)*w; const env=Math.abs(Math.sin(i*0.09+ph*1.3))*Math.abs(Math.sin(i*0.3+ph)); const hh=env*h*0.34*(morph); ctx.fillStyle=`rgba(${60+env*120|0},${120+env*100|0},${200},${0.15+env*0.5})`; ctx.fillRect(x-1, h*0.5-hh, 3, hh*2); }
+    }
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+  window.addEventListener('resize',()=>{ ctx=setupCanvas(c,W(),H()); });
+})();
+
+// ── scroll-spy ────────────────────────────────────────────────
+(function toc(){
+  const links=document.querySelectorAll('nav#toc a');
+  const secs=Array.from(links).map(a=>document.querySelector(a.getAttribute('href'))).filter(Boolean);
+  function onScroll(){ const y=window.scrollY+120; let k=0; for(let i=0;i<secs.length;i++){ if(secs[i].offsetTop<=y) k=i; } links.forEach(a=>a.classList.remove('active')); if(links[k]) links[k].classList.add('active'); }
+  window.addEventListener('scroll',onScroll,{passive:true}); onScroll();
+})();
+})();
+</script>
+</body>
+</html>
